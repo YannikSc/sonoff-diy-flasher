@@ -1,0 +1,11 @@
+[package]
+name = "sonoff-diy-flasher"
+version = "0.1.0"
+authors = ["Yannik <yannik@yannik-sc.de>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+gotham = "0.5.*"
+gotham_derive = "0.5.*"
