@@ -1,5 +1,6 @@
-use crate::file_range::{read_file_ranges, RangedFileResult};
-use crate::range::parse_range_header;
+use std::path::PathBuf;
+use std::pin::Pin;
+
 use gotham::{
     handler::{HandlerFuture, IntoResponse},
     hyper::HeaderMap,
@@ -11,8 +12,9 @@ use gotham::{
     },
     state::{FromState, State},
 };
-use std::path::PathBuf;
-use std::pin::Pin;
+
+use crate::file_range::{RangedFileResult, read_file_ranges};
+use crate::range::parse_range_header;
 
 #[derive(Clone, NewMiddleware)]
 pub struct ServerResources {
@@ -32,6 +34,8 @@ pub fn handle_firmware_get(state: State) -> (State, impl IntoResponse) {
         let range = range.to_str().unwrap_or("");
         let range = parse_range_header(String::from(range));
 
+        println!("[info] requested a piece of firmware: {:?}", range);
+
         return (state, read_file_ranges(range, data.path.clone()));
     }
 
@@ -48,8 +52,8 @@ pub fn router(path: PathBuf) -> Router {
 
 impl Middleware for ServerResources {
     fn call<Chain>(self, mut state: State, chain: Chain) -> Pin<Box<HandlerFuture>>
-    where
-        Chain: FnOnce(State) -> Pin<Box<HandlerFuture>>,
+        where
+            Chain: FnOnce(State) -> Pin<Box<HandlerFuture>>,
     {
         state.put(ServerResourcesData {
             path: self.path.clone(),

@@ -4,6 +4,11 @@ extern crate serde;
 
 use std::env::args;
 use std::env::current_dir;
+use std::io::stdin;
+
+use gotham::init_server;
+use tokio::runtime;
+use tokio::runtime::Runtime;
 
 use error::FlasherError;
 use http::router;
@@ -18,8 +23,49 @@ mod http;
 mod range;
 mod sonoff_api;
 
+fn new_runtime() -> Runtime {
+    runtime::Builder::new()
+        .threaded_scheduler()
+        .core_threads(4)
+        .thread_name("gotham-worker")
+        .enable_all()
+        .build()
+        .unwrap()
+}
+
+fn get_local_ip() -> Result<String, FlasherError> {
+    let interfaces = get_if_addrs::get_if_addrs().or(Err(FlasherError::new("Could not determine interface IPs.")))?;
+
+    println!("[info] Select the IP on which the sonoff can reach your PC:");
+
+    for index in 0..interfaces.len() {
+        let interface = interfaces.get(index).unwrap();
+
+        println!("[info] {}: {}", index, interface.addr.ip());
+    }
+
+    loop {
+        let mut selected = String::new();
+
+        eprint!("[input]> ");
+        stdin().read_line(&mut selected).or(Err(FlasherError::new("Could not read from stdin")))?;
+
+        if let Ok(number) = selected.trim().parse::<u32>() {
+            if let Some(interface) = interfaces.get(number as usize) {
+                let ip = interface.addr.ip().to_string();
+
+                println!("[info] Selected {}", &ip);
+
+                return Ok(ip);
+            }
+        }
+
+        eprintln!("[error] Insert a number between 0 and {}", interfaces.len() - 1);
+    }
+}
+
 fn try_main() -> Result<(), FlasherError> {
-    let bind_address = "127.0.0.1:8001";
+    let bind_address = format!("{}:8001", get_local_ip()?);
     let mut app_args = args();
 
     app_args.next();
@@ -39,11 +85,18 @@ fn try_main() -> Result<(), FlasherError> {
     }
 
     let firmware_hash = sha256_hash_file(&file)?;
-    println!("[info] starting firmware-serving web server");
-    gotham::start_with_num_threads(bind_address.clone(), router(file), 1);
+    println!("[info] starting firmware-serving web server on {}", &bind_address);
+
+    let server_bind_address = bind_address.clone();
+    let mut runtime = new_runtime();
+    let handle = runtime.spawn(async move { init_server(server_bind_address, router(file)).await });
 
     println!("[info] flashing sonoff");
     flash_sonoff(&sonoff_ip, &String::from(bind_address), &firmware_hash)?;
+
+    runtime.block_on(handle)
+        .or(Err(FlasherError::new("Could not block handle in runtime")))?
+        .or(Err(FlasherError::new("Could not block handle in runtime")))?;
 
     Ok(())
 }

@@ -85,8 +85,8 @@ pub fn flash_ota(
     host: &String,
     own_bind: &String,
     firmware_sha256: &String,
-) -> Result<SonoffResponse<Value>, FlasherError> {
-    send_http_request(
+) -> Result<SonoffResponse<()>, FlasherError> {
+    if let Err(error) = send_http_request::<OtaFlashRequest, ()>(
         format!("http://{}:8081/zeroconf/ota_flash", host),
         SonoffRequestBody::new(
             "",
@@ -95,7 +95,11 @@ pub fn flash_ota(
                 sha256sum: firmware_sha256.clone(),
             },
         ),
-    )
+    ) {
+        eprintln!("[warn] could not complete flashing request. This may not be an error! {}", error)
+    }
+
+    Ok(SonoffResponse { data: () })
 }
 
 pub fn send_http_request<D: Serialize + DeserializeOwned, O: DeserializeOwned>(
@@ -108,7 +112,7 @@ pub fn send_http_request<D: Serialize + DeserializeOwned, O: DeserializeOwned>(
         .post(url)
         .json(&body)
         .send()
-        .or(Err(FlasherError::new("Could not send request")))?;
+        .or_else(|error| Err(FlasherError(format!("Could not send request: {}", error))))?;
 
     response.json().or_else(|error| {
         Err(FlasherError::new(format!(
