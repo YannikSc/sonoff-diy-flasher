@@ -1,14 +1,14 @@
 use std::{
     fs::{File, OpenOptions},
-    io::Read,
+    io::{Cursor, Read},
     path::PathBuf,
     time::SystemTime,
 };
 
-use gotham::{
-    handler::IntoResponse,
-    hyper::{header::HeaderValue, Body, Response},
-    state::State,
+use rocket::{
+    http::Header,
+    response::{self, Responder},
+    Request, Response,
 };
 
 use crate::range::{Position, Range, RangeBounding};
@@ -21,6 +21,7 @@ pub enum RangedFileResult {
 pub struct RangedFile {
     content: Vec<u8>,
     range: RangeBounding,
+    file_size: u64,
 }
 
 pub fn read_file_ranges(range: Range, file: PathBuf) -> RangedFileResult {
@@ -35,10 +36,18 @@ pub fn read_file_ranges(range: Range, file: PathBuf) -> RangedFileResult {
     }
 }
 
-impl IntoResponse for RangedFileResult {
-    fn into_response(self, _state: &State) -> Response<Body> {
+impl<'r> Responder<'r> for RangedFileResult {
+    fn respond_to(self, _request: &Request) -> response::Result<'r> {
         match self {
-            RangedFileResult::One(file) => Response::new(file.content.into()),
+            RangedFileResult::One(file) => {
+                let size = get_header_range_from_file(&file);
+                let mut response = Response::new();
+
+                response.set_sized_body(Cursor::new(file.content));
+                response.set_header(Header::new("Content-Range", size));
+
+                return Ok(response);
+            }
             RangedFileResult::Multiple(files) => {
                 let mut body: Vec<u8> = vec![];
 
@@ -49,7 +58,7 @@ impl IntoResponse for RangedFileResult {
                     body.append(
                         &mut format!(
                             "Content-Type: application/octet-stream
-Content-Range: bytes {}/32\n\n",
+Content-Range: {}\n\n",
                             get_header_range_from_file(&file)
                         )
                         .as_bytes()
@@ -60,50 +69,61 @@ Content-Range: bytes {}/32\n\n",
 
                 body.append(&mut format!("\n--{}--\n", &boundary).as_bytes().to_vec());
 
-                let mut res = Response::new(body.into());
-
-                res.headers_mut().insert(
+                let mut response = Response::new();
+                response.set_sized_body(Cursor::new(body));
+                response.set_header(Header::new(
                     "Content-Type",
-                    HeaderValue::from_str(
-                        format!("multipart/byteranges; boundary={}", &boundary).as_str(),
-                    )
-                    .unwrap(),
-                );
+                    format!("multipart/byteranges; boundary={}", &boundary),
+                ));
 
-                res
+                return Ok(response);
             }
         }
     }
 }
 
-fn get_header_range_from_file(file: &RangedFile) -> String {
+pub fn get_header_range_from_file(file: &RangedFile) -> String {
     let from = match file.range.from {
         Position::Fixed(value) => value,
         _ => 0_i64,
     };
 
-    let to = match file.range.from {
+    let to = match file.range.to {
         Position::Fixed(value) => value,
         _ => file.content.len() as i64,
     };
 
-    format!("{}-{}", from, to)
+    format!("{} {}-{}/{}", file.range.unit, from, to, file.file_size)
 }
 
 fn read_file_range(range: &RangeBounding, file: PathBuf) -> RangedFile {
     let file = OpenOptions::new().write(false).read(true).open(file);
 
     if let Ok(file) = file {
+        let size = get_file_size(&file);
+
         return RangedFile {
             content: extract_file_range(file, range),
             range: range.clone(),
+            file_size: size,
         };
     }
 
     RangedFile {
         content: vec![],
         range: range.clone(),
+        file_size: 0,
     }
+}
+
+fn get_file_size(file: &File) -> u64 {
+    file.sync_all().unwrap_or_default();
+
+    if let Ok(metadata) = file.metadata() {
+        return metadata.len();
+    }
+
+    0
 }
 
 fn extract_file_range(file: File, range: &RangeBounding) -> Vec<u8> {

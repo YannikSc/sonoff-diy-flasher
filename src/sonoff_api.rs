@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::FlasherError;
@@ -96,7 +96,10 @@ pub fn flash_ota(
             },
         ),
     ) {
-        eprintln!("[warn] could not complete flashing request. This may not be an error! {}", error)
+        eprintln!(
+            "[warn] could not complete flashing request. This may not be an error! {}",
+            error
+        )
     }
 
     Ok(SonoffResponse { data: () })
