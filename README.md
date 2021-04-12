@@ -35,3 +35,8 @@ cargo install sonoff-diy-flasher
 cargo +nightly install sonoff-diy-flasher
 ```
 
+## Planed features
+
+- [x] A working CLI utility to flash ESP firmware via the Sonoff DIY API
+  - [ ] A progress bar
+- [ ] A GUI for the more graphical folk
