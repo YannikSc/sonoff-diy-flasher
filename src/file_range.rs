@@ -12,6 +12,7 @@ use rocket::{
 };
 
 use crate::range::{Position, Range, RangeBounding};
+use rocket::http::Status;
 
 pub enum RangedFileResult {
     One(RangedFile),
@@ -43,6 +44,7 @@ impl<'r> Responder<'r> for RangedFileResult {
                 let size = get_header_range_from_file(&file);
                 let mut response = Response::new();
 
+                response.set_status(Status::new(206, "Partial Content"));
                 response.set_sized_body(Cursor::new(file.content));
                 response.set_header(Header::new("Content-Range", size));
 
@@ -88,10 +90,16 @@ pub fn get_header_range_from_file(file: &RangedFile) -> String {
         _ => 0_i64,
     };
 
-    let to = match file.range.to {
+    let mut to = match file.range.to {
         Position::Fixed(value) => value,
         _ => file.content.len() as i64,
     };
+
+    if to > file.file_size as i64 {
+        to = (file.file_size - 1) as i64;
+    }
+
+    println!("Serving {} {}-{}/{}", file.range.unit, from, to, file.file_size);
 
     format!("{} {}-{}/{}", file.range.unit, from, to, file.file_size)
 }
